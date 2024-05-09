@@ -1,47 +1,57 @@
 import numpy as np
+import pandas as pd
 from PIL import Image
 
 
+
 def convert_image_matrix(image):
+    width, height = image.size
+    energy_rgb = np.zeros((height, width), dtype=[('color', '3uint64'), ('energy', 'float32')])
+
     pix = image.load()
-    x, y = np.shape(image)[0], np.shape(image)[1]
-    energy_rbg = np.zeros((y, x, 2), dtype=object)
-    energy = 10
-    for col in range(image.size[0]):
-        for row in range(image.size[1]):
-            energy_rbg[col][row][0] = pix[col, row]
-            energy_rbg[col][row][1] = energy
-    return energy_rbg
+    for row in range(height):
+        for col in range(width):
+            energy_rgb[row][col]['color'] = pix[col, row]  
+            energy_rgb[row][col]['energy'] = 10  
 
-
+    return energy_rgb
 def calc_energy(pix, pos):
-    pix_shape = np.shape(pix)
-    row, col = pos[0], pos[1]
-    # if on the border
-    if row not in range(1, pix_shape[0] - 1) or col not in range(1, pix_shape[1] - 1):
-        return 1000  # set energy to 1000
-    else:  # if not on border
-        top = pix[row - 1][col][0]
-        bottom = pix[row + 1][col][0]
-        left = pix[row][col - 1][0]
-        right = pix[row][col + 1][0]
+    row, col = pos
+    if row == 0 or row == pix.shape[0] - 1 or col == 0 or col == pix.shape[1] - 1:
+        return 1000
+    else:
+       
+        top = pix[row - 1, col]['color']
+        bottom = pix[row + 1, col]['color']
+        left = pix[row, col - 1]['color']
+        right = pix[row, col + 1]['color']
 
         delta_x = np.sum(np.power(np.subtract(left, right), 2))
         delta_y = np.sum(np.power(np.subtract(top, bottom), 2))
+        # if row==1 and col==2:
+        #     try:
+        #         delta_x = np.sum(np.power(np.subtract(left, right), 2))
+        #         delta_y = np.sum(np.power(np.subtract(top, bottom), 2))
+        #     except Exception as e:
+        #         print(f"An error occurred: {e}")
+        #     print("top", top, "bottom", bottom)
+        #     print("left", left, "right", right)
+        #     print("1st", np.subtract(top, bottom))
+        #     print("2nd", (np.subtract(top, bottom)**2))
+        #     print("3rd", np.sum(np.power(np.subtract(top, bottom), 2)))
+        #     print("row:",row, "col:", col, " delta_x:",delta_x, " delta_y:",delta_y)
 
+        # Return the magnitude of the gradient
         return np.sqrt(delta_x + delta_y)
-
 
 def map_energy_matrix(matrix):
     for i in range(np.shape(matrix)[0]):
         for j in range(np.shape(matrix)[1]):
-            matrix[i][j][1] = calc_energy(matrix, (i, j))
-
+            matrix[i][j]["energy"] = calc_energy(matrix, (i, j))
 
 def vertical_path_finder(matrix):
     cumm_path_energy = np.zeros((np.shape(matrix)[0], np.shape(matrix)[1]))
     path = np.zeros((np.shape(matrix)[0], np.shape(matrix)[1]), dtype=object)
-
     for row in range(np.shape(matrix)[0]):
         for col in range(np.shape(matrix)[1]):
             ## Checking above
@@ -77,7 +87,6 @@ def vertical_path_finder(matrix):
                         path[row][col] = (row - 1, col - 1)
 
     smallest_col=np.argmin(cumm_path_energy[-1])
-  
     prev = path[-1][smallest_col]
     full_smallest_path=[(np.shape(matrix)[0]-1,smallest_col),prev]
     while prev!=None:
@@ -89,12 +98,11 @@ def vertical_path_finder(matrix):
     out[:] = full_smallest_path
     return np.flip(out)
 
-
 def remove_and_shift(matrix, positions):
+    n, p = matrix.shape[0], matrix.shape[1]
+    # Ensure new_matrix retains the same structured dtype
+    new_matrix = np.zeros((n, p - 1), dtype=matrix.dtype)
 
-    n, p, dim2 = np.shape(matrix)
-    new_matrix = np.zeros((n, p - 1, dim2), dtype=matrix.dtype)
-    
     # Convert positions list to a dictionary where keys are rows and values are columns to skip
     skip_dict = {}
     for row, col in positions:
@@ -103,7 +111,7 @@ def remove_and_shift(matrix, positions):
         else:
             skip_dict[row] = [col]
 
-    # Sort each list of columns to skip for efficient skipping
+    # Sort the columns to skip for each row for efficient skipping
     for key in skip_dict:
         skip_dict[key].sort()
 
@@ -124,15 +132,44 @@ def remove_and_shift(matrix, positions):
 
     return new_matrix
 
-    
-if __name__ == '__main__':
-    image = Image.open("input.jpg")
+def generate_requiremts_submissions():
+    image = Image.open("seam_image_in.jpeg")
     matrix = convert_image_matrix(image)
-    iter=20
-    
-    for i in range(iter):
-        print(np.shape(matrix))
-        map_energy_matrix(matrix)
-        shortest_path=vertical_path_finder(matrix)
-        matrix=remove_and_shift(matrix, shortest_path)
+    map_energy_matrix(matrix)
+    print(matrix[1][2]["energy"])
+    df_energy_no_pad = pd.DataFrame(matrix[1:-1,1:-1]["energy"])
+    df_energy_no_pad.to_csv("energy.csv", index=False, header=False)
+    shortest_path=vertical_path_finder(matrix)
+    columns_shortest=np.array([i[1]for i in shortest_path])
+    df_cols=pd.DataFrame(columns_shortest)
+    df_cols.to_csv("seam1.csv", index=False, header=False)
 
+def matrix_to_jpeg(matrix, filename):
+    """
+    Converts a matrix of RGB tuples to a JPEG image.
+
+    Args:
+    matrix (np.ndarray): A 2D numpy array where each entry is a tuple (r, g, b).
+    filename (str): The name of the file to save the JPEG image.
+    """
+
+    image = Image.fromarray(np.uint8(matrix), 'RGB')
+    image.save(filename, 'JPEG')
+
+if __name__ == '__main__':
+    # generate_requiremts_submissions()
+    image = Image.open("image_test.jpg")
+    matrix = convert_image_matrix(image)
+    iterations = 100
+    
+    for i in range(iterations):
+        print(f"--- Iteration {i+1} ---")
+        map_energy_matrix(matrix)
+        shortest_path = vertical_path_finder(matrix) 
+        matrix = remove_and_shift(matrix, shortest_path)
+    
+    rgb_data = np.stack([row['color'] for row in matrix])
+    matrix_to_jpeg(rgb_data, "final_image.jpg")
+    
+
+    
